@@ -1,12 +1,17 @@
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
 import openai
 import os
 import uuid
 
-# Configure sua chave da OpenAI como variável de ambiente:
-# export OPENAI_API_KEY=""
+# Carrega variáveis do .env, se existir
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Configura a chave da OpenAI a partir da variável de ambiente
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI(
@@ -23,15 +28,18 @@ def extrair_texto_pdf(bytes_arquivo: bytes) -> str:
     # TODO: implementar extração de texto de PDF (ex.: pdfplumber)
     return ""
 
- def extrair_texto_docx(bytes_arquivo: bytes) -> str:
+
+def extrair_texto_docx(bytes_arquivo: bytes) -> str:
     # TODO: implementar extração de texto de DOCX (ex.: python-docx)
     return ""
 
- def extrair_texto_linkedin(url: str) -> str:
+
+def extrair_texto_linkedin(url: str) -> str:
     # TODO: implementar scraping básico do LinkedIn (ex.: requests + BeautifulSoup)
     return ""
 
- def chamar_servicos_openai(texto: str, servicos: list[str]) -> str:
+
+def chamar_servicos_openai(texto: str, servicos: list[str]) -> str:
     # Constrói o prompt em Português conforme serviços solicitados
     prompt = "Analise o seguinte texto de currículo e forneça:\n"
     if "revisao_tecnica" in servicos:
@@ -112,3 +120,19 @@ async def resultado(job_id: str):
     if not job or job.get("status", 0) < 100:
         raise HTTPException(status_code=404, detail="Resultado não disponível ainda.")
     return {"analise": job["resultado"]}
+
+# ---- Health Check ----
+@app.get("/health")
+async def health_check():
+    """
+    Verifica se a chave da OpenAI está configurada e se a API está acessível.
+    """
+    chave = os.getenv("OPENAI_API_KEY")
+    if not chave:
+        raise HTTPException(status_code=500, detail="Chave da OpenAI não configurada.")
+    try:
+        # Teste simples de autenticação
+        openai.Engine.list()
+        return {"status": "OK", "detalhe": "Chave configurada e válida."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha ao conectar na OpenAI: {e}")
