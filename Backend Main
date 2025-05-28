@@ -1,0 +1,114 @@
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
+from dotenv import load_dotenv
+import openai
+import os
+import uuid
+
+# Configure sua chave da OpenAI como variável de ambiente:
+# export OPENAI_API_KEY=""
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+app = FastAPI(
+    title="Analisador de Currículo",
+    description="API para análise técnica, revisão gramatical, tradução e elaboração de carta de apresentação de currículos.",
+    version="1.0.0"
+)
+
+# Armazenamento de jobs em memória (MVP)
+jobs = {}
+
+# ---- Funções auxiliares ----
+def extrair_texto_pdf(bytes_arquivo: bytes) -> str:
+    # TODO: implementar extração de texto de PDF (ex.: pdfplumber)
+    return ""
+
+ def extrair_texto_docx(bytes_arquivo: bytes) -> str:
+    # TODO: implementar extração de texto de DOCX (ex.: python-docx)
+    return ""
+
+ def extrair_texto_linkedin(url: str) -> str:
+    # TODO: implementar scraping básico do LinkedIn (ex.: requests + BeautifulSoup)
+    return ""
+
+ def chamar_servicos_openai(texto: str, servicos: list[str]) -> str:
+    # Constrói o prompt em Português conforme serviços solicitados
+    prompt = "Analise o seguinte texto de currículo e forneça:\n"
+    if "revisao_tecnica" in servicos:
+        prompt += "1. Revisão técnica (pontos fortes e fracos)\n"
+    if "revisao_gramatical" in servicos:
+        prompt += "2. Correções gramaticais em Português\n"
+    if "traducao_en" in servicos:
+        prompt += "3. Traduza para Inglês\n"
+    if "traducao_es" in servicos:
+        prompt += "4. Traduza para Espanhol\n"
+    if "carta_apresentacao" in servicos:
+        prompt += "5. Elabore uma carta de apresentação para este perfil\n"
+    prompt += f"\nTexto do CV:\n{texto}"
+
+    resposta = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7
+    )
+    return resposta.choices[0].message.content
+
+# ---- Processamento em background ----
+def processar_job(job_id: str, arquivo: UploadFile | None, url: str | None, servicos: list[str]):
+    jobs[job_id]["status"] = 10  # Recebido
+
+    # Extração de texto
+    if arquivo:
+        dados = arquivo.file.read()
+        if arquivo.filename.lower().endswith(".pdf"):
+            texto = extrair_texto_pdf(dados)
+        else:
+            texto = extrair_texto_docx(dados)
+    else:
+        texto = extrair_texto_linkedin(url)
+    jobs[job_id]["status"] = 30  # Texto extraído
+
+    # Chamada à OpenAI
+    resultado_ai = chamar_servicos_openai(texto, servicos)
+    jobs[job_id]["status"] = 80  # Análise concluída pela AI
+
+    # Armazena resultado
+    jobs[job_id]["resultado"] = resultado_ai
+    jobs[job_id]["status"] = 100  # Completo
+
+# ---- Endpoints ----
+@app.post("/analisar")
+async def analisar(
+    background_tasks: BackgroundTasks,
+    arquivo: UploadFile = File(None),
+    url: str = Form(None),
+    servicos: str = Form(...)
+):
+    """
+    Envie um currículo (PDF/DOCX) ou URL do LinkedIn e liste serviços separados por vírgula:
+    revisao_tecnica, revisao_gramatical, traducao_en, traducao_es, carta_apresentacao
+    """
+    if not arquivo and not url:
+        raise HTTPException(status_code=400, detail="Forneça um arquivo ou uma URL do LinkedIn.")
+
+    lista_servicos = [s.strip() for s in servicos.split(",")]
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": 0, "resultado": None}
+    background_tasks.add_task(processar_job, job_id, arquivo, url, lista_servicos)
+    return {"job_id": job_id}
+
+@app.get("/status/{job_id}")
+async def status(job_id: str):
+    """Retorna o progresso atual do processamento (0-100)."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+    return {"status": job["status"]}
+
+@app.get("/resultado/{job_id}")
+async def resultado(job_id: str):
+    """Retorna a análise completa quando estiver pronta."""
+    job = jobs.get(job_id)
+    if not job or job.get("status", 0) < 100:
+        raise HTTPException(status_code=404, detail="Resultado não disponível ainda.")
+    return {"analise": job["resultado"]}
